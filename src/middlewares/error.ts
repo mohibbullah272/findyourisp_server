@@ -1,106 +1,131 @@
 import { Request, Response, NextFunction } from 'express';
+
+import mongoose from 'mongoose';
 import AppError from './appError';
 
-/**
- * Handle CastError (invalid MongoDB ObjectId)
- */
-const handleCastErrorDB = (err: any) => {
-  const message = `Invalid ${err.path}: ${err.value}.`;
-  return new AppError(message, 400);
+// Detect if error is operational
+const isOperationalError = (error: any): boolean => {
+  return error instanceof AppError || error.isOperational === true;
 };
 
-/**
- * Handle Duplicate Fields Error (unique constraint violation)
- */
-const handleDuplicateFieldsDB = (err: any) => {
-  const field = Object.keys(err.keyValue)[0];
-  const value = err.keyValue[field];
+// Handle specific MongoDB errors
+const handleMongoErrors = (error: any): AppError => {
+  // Duplicate key error
+  if (error.code === 11000) {
+    const field = Object.keys(error.keyValue)[0];
+    const value = error.keyValue[field];
+    return AppError.conflict(
+      `Duplicate value for ${field}: ${value} already exists`,
+      { field, value }
+    );
+  }
 
-  const message = `Duplicate ${field}: ${value}. Please use another value!`;
-  return new AppError(message, 409);
+  // CastError (invalid ObjectId)
+  if (error.name === 'CastError') {
+    return AppError.badRequest(
+      `Invalid ${error.path}: ${error.value}`,
+      { path: error.path, value: error.value }
+    );
+  }
+
+  // ValidationError
+  if (error.name === 'ValidationError') {
+    const errors = Object.values(error.errors).map((err: any) => ({
+      field: err.path,
+      message: err.message,
+    }));
+    return AppError.validationError('Validation failed', errors);
+  }
+
+  // Mongoose timeout
+  if (error.name === 'MongooseTimeoutError') {
+    return AppError.internalError('Database operation timed out');
+  }
+
+  return AppError.internalError('Database error occurred');
 };
 
-/**
- * Handle Validation Error (Mongoose validation error)
- */
-const handleValidationErrorDB = (err: any) => {
-  const errors = Object.values(err.errors).map((val: any) => val.message);
-  const message = `Invalid input data. ${errors.join('. ')}`;
-  return new AppError(message, 400);
-};
-
-/**
- * Handle JWT Error (invalid token)
- */
-const handleJWTError = () =>
-  new AppError('Invalid token. Please log in again!', 401);
-
-/**
- * Handle JWT Expired Error (token expired)
- */
-const handleJWTExpiredError = () =>
-  new AppError('Your token has expired! Please log in again.', 401);
-
-/**
- * Send error response in development environment
- */
-const sendErrorDev = (err: AppError, res: Response) => {
-  res.status(err.statusCode).json({
+// Send error in development
+const sendErrorDev = (error: AppError, res: Response) => {
+  res.status(error.statusCode).json({
     success: false,
-    error: err,
-    message: err.message,
-    stack: err.stack
+    status: error.status,
+    message: error.message,
+    error: error,
+    stack: error.stack,
+    timestamp: new Date().toISOString(),
   });
 };
 
-/**
- * Send error response in production environment
- */
-const sendErrorProd = (err: AppError, res: Response) => {
-  // Operational, trusted error: send message to client
-  if (err.isOperational) {
-    res.status(err.statusCode).json({
+// Send error in production
+const sendErrorProd = (error: AppError, res: Response) => {
+  // Operational, trusted error
+  if (isOperationalError(error)) {
+    res.status(error.statusCode).json({
       success: false,
-      message: err.message
+      status: error.status,
+      message: error.message,
+      ...(error.details && { details: error.details }),
+      timestamp: new Date().toISOString(),
     });
-  } else {
-    // Programming or other unknown error: don't leak error details
-    console.error('ERROR 💥', err);
+  } 
+  // Programming or unknown error
+  else {
+    // Log error for monitoring
+    console.error('🚨 ERROR:', error);
+
     res.status(500).json({
       success: false,
-      message: 'Something went wrong!'
+      status: 'error',
+      message: 'Something went wrong!',
+      timestamp: new Date().toISOString(),
     });
   }
 };
 
-/**
- * Global error handling middleware
- */
-const globalErrorHandler = (
-  err: any,
+// Global error handler middleware
+export const globalErrorHandler = (
+  error: any,
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  err.statusCode = err.statusCode || 500;
-  err.status = err.status || 'error';
+  // Set default values
+  error.statusCode = error.statusCode || 500;
+  error.status = error.status || 'error';
 
-  if (process.env.NODE_ENV === 'development') {
-    return sendErrorDev(err, res);
+  // Handle different error types
+  let processedError = error;
+
+  // Handle MongoDB errors
+  if (error instanceof mongoose.Error || error.code === 11000) {
+    processedError = handleMongoErrors(error);
   }
 
-  if (process.env.NODE_ENV === 'production') {
-    let error = err;
+  // Handle JWT errors
+  if (error.name === 'JsonWebTokenError') {
+    processedError = AppError.unauthorized('Invalid token');
+  }
 
-    if (error.name === 'CastError') error = handleCastErrorDB(error);
-    if (error.code === 11000) error = handleDuplicateFieldsDB(error);
-    if (error.name === 'ValidationError') error = handleValidationErrorDB(error);
-    if (error.name === 'JsonWebTokenError') error = handleJWTError();
-    if (error.name === 'TokenExpiredError') error = handleJWTExpiredError();
+  if (error.name === 'TokenExpiredError') {
+    processedError = AppError.unauthorized('Token expired');
+  }
 
-    return sendErrorProd(error, res);
+  // Environment-based error response
+  if (process.env.NODE_ENV === 'development') {
+    sendErrorDev(processedError, res);
+  } else {
+    sendErrorProd(processedError, res);
   }
 };
+
+
+export const asyncHandler = (fn: Function) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+};
+
 
 
 export default  globalErrorHandler

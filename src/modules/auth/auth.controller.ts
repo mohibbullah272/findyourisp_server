@@ -1,13 +1,14 @@
 import { Request, Response } from "express";
 import catchAsync from "../../utility/catchAsync";
 import { authService } from "./auth.service";
+import { successResponse } from "../../utility/apiResponse";
 
 
 
 const createAccount = catchAsync(async(req:Request,res:Response)=>{
-  console.log("hit")
+
     const user = await authService.createAccount(req.body)
-console.log(user)
+
     res.cookie("accessToken",user.token,{
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -23,6 +24,12 @@ console.log(user)
           email: user.userSafeData.email,
         },
       });
+      return successResponse(res,{
+        user:user.userSafeData
+      },
+      "account created successfully",
+      201
+      )
 })
 
 
