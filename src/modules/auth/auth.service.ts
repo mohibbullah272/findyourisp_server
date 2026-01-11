@@ -1,8 +1,8 @@
-import { Request, Response } from "express";
-import catchAsync from "../../utility/catchAsync";
+
 import { User } from "../users/user.model";
 import bcrypt from "bcryptjs";
 import { generateToken } from "../../utility/genarateToken";
+import AppError from "../../middlewares/appError";
 
 
 const createAccount = async(payload: { email: string; password: string; }) => {
@@ -10,11 +10,12 @@ const {email,password}=payload
 
 const isEmailAlreadyExist = await User.findOne({email})
 if(isEmailAlreadyExist?.email){
-    throw new Error("email Already Exist")
+    throw new AppError("Email already exist",409)
 }
-const salt = await bcrypt.genSalt(Number(process.env.SALT!))
 
-const hashedPassword = await bcrypt.hash(password,salt)
+
+const hashedPassword = await bcrypt.hash(password, 10)
+
 
 const user = await User.create({
     email,
@@ -43,12 +44,12 @@ const login = async (payload: { email: string; password: string; }) => {
   
     const user = await User.findOne({ email }).select("+password");
     if (!user) {
-      throw new Error("Invalid credentials");
+      throw new AppError("Invalid credentials",403);
     }
   
     const isPasswordMatch = await bcrypt.compare(password, user.password);
     if (!isPasswordMatch) {
-      throw new Error("Invalid credentials");
+      throw new AppError("Invalid credentials",403);
     }
   
     const token = await generateToken({

@@ -5,8 +5,9 @@ import { authService } from "./auth.service";
 
 
 const createAccount = catchAsync(async(req:Request,res:Response)=>{
+  console.log("hit")
     const user = await authService.createAccount(req.body)
-
+console.log(user)
     res.cookie("accessToken",user.token,{
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",

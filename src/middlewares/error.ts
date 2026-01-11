@@ -13,9 +13,11 @@ const handleCastErrorDB = (err: any) => {
  * Handle Duplicate Fields Error (unique constraint violation)
  */
 const handleDuplicateFieldsDB = (err: any) => {
-  const value = err.errmsg.match(/(["'])(\\?.)*?\1/)[0];
-  const message = `Duplicate field value: ${value}. Please use another value!`;
-  return new AppError(message, 400);
+  const field = Object.keys(err.keyValue)[0];
+  const value = err.keyValue[field];
+
+  const message = `Duplicate ${field}: ${value}. Please use another value!`;
+  return new AppError(message, 409);
 };
 
 /**
@@ -74,15 +76,21 @@ const sendErrorProd = (err: AppError, res: Response) => {
 /**
  * Global error handling middleware
  */
-const globalErrorHandler = (err: any, req: Request, res: Response, next: NextFunction) => {
+const globalErrorHandler = (
+  err: any,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
 
   if (process.env.NODE_ENV === 'development') {
-    sendErrorDev(err, res);
-  } else if (process.env.NODE_ENV === 'production') {
-    let error = { ...err };
-    error.message = err.message;
+    return sendErrorDev(err, res);
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    let error = err;
 
     if (error.name === 'CastError') error = handleCastErrorDB(error);
     if (error.code === 11000) error = handleDuplicateFieldsDB(error);
@@ -90,8 +98,9 @@ const globalErrorHandler = (err: any, req: Request, res: Response, next: NextFun
     if (error.name === 'JsonWebTokenError') error = handleJWTError();
     if (error.name === 'TokenExpiredError') error = handleJWTExpiredError();
 
-    sendErrorProd(error, res);
+    return sendErrorProd(error, res);
   }
 };
+
 
 export default  globalErrorHandler
