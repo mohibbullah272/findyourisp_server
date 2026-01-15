@@ -6,3 +6,10 @@ export const generateToken = async(payload:object)=>{
         expiresIn: "30d",
     })
 }
+
+export const verifyToken = (token: string, secret: string) => {
+
+    const verifiedToken = jwt.verify(token, secret);
+
+    return verifiedToken
+}

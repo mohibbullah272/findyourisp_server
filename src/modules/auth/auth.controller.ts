@@ -16,14 +16,7 @@ const createAccount = catchAsync(async(req:Request,res:Response)=>{
         maxAge: 7 * 24 * 60 * 60 * 1000,
     })
 
-    res.status(201).json({
-        success: true,
-        message: "Account created successfully",
-        user: {
-          id: user.userSafeData.userId,
-          email: user.userSafeData.email,
-        },
-      });
+
       return successResponse(res,{
         user:user.userSafeData
       },
